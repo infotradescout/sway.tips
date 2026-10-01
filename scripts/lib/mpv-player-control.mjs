@@ -9,10 +9,12 @@ const commands = Object.freeze({ play: ['set_property', 'pause', false], pause: 
 export class MpvPlayerControl {
   constructor({ socketPath, timeoutMs = 5000 } = {}) {
     if (typeof socketPath !== 'string' || socketPath.length > 240 || /[\r\n\0]/.test(socketPath)
-      || (process.platform === 'win32' ? !/^\\\\\.\\pipe\\[\w.-]+$/.test(socketPath) : !path.isAbsolute(socketPath))) {
+      || (process.platform === 'win32' ? !/^\\\\\.\\pipe\\[\w.-]+$/i.test(socketPath) : !path.isAbsolute(socketPath))) {
       throw new Error('Choose an absolute local mpv IPC socket or a Windows named pipe.');
     }
-    this.endpoint = process.platform === 'win32' ? socketPath : path.normalize(socketPath);
+    // Windows resolves pipe names without case distinctions. Canonicalize before
+    // registry hashing so case aliases cannot bypass uncertainty/in-flight holds.
+    this.endpoint = process.platform === 'win32' ? socketPath.toLowerCase() : path.normalize(socketPath);
     this.timeoutMs = requestTimeout(timeoutMs);
     this.program = 'mpv'; this.protocol = 'mpv_json_ipc';
   }

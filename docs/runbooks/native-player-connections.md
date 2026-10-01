@@ -34,6 +34,16 @@ command history and uncertainty holds. An exclusive lock prevents concurrent own
 after a crash, verify the old process has ended before supervised lock recovery.
 Never delete history to clear an uncertain command.
 
+Windows mpv pipe names are case-insensitive. This helper gives differently cased
+names for the same local pipe one target identity, so aliases share uncertainty
+and in-flight holds. Unix socket paths keep their case-sensitive identities.
+New journals record the canonical Windows pipe identity format. An older journal
+without that provenance cannot open a Windows mpv connection, including one with
+a new connection ID. Preserve it for supervised migration; do not delete history
+or add the format marker by hand. Migration must account for every original target
+and unresolved outcome. Existing VLC/VirtualDJ and Unix mpv journals remain usable.
+This source protection does not verify the Windows pipe's access-control list.
+
 The helper listens only on `127.0.0.1:4316`, accepts only `https://app.sway.tips`, and
 prints a private random pairing key valid for up to six hours. Keep its window open.
 In Sources, enter that key under **Link player computer**. Allow local-network access
