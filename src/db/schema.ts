@@ -14,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid
 } from 'drizzle-orm/pg-core';
@@ -623,7 +624,7 @@ export const swayRoBusinessBindings = pgTable('sway_ro_business_bindings', {
   revoked: boolean('revoked').notNull().default(false),
   revision: text('revision').notNull(),
   evidenceReference: text('evidence_reference').notNull()
-}, (table) => ({ assetUnique: uniqueIndex('sway_ro_business_bindings_performer_id_provider_account_id_key').on(table.performerId, table.provider, table.accountId) }));
+}, (table) => ({ assetUnique: unique('sway_ro_business_bindings_performer_id_provider_account_id_key').on(table.performerId, table.provider, table.accountId) }));
 
 export const swayRoProposals = pgTable('sway_ro_proposals', {
   id: uuid('id').primaryKey(),

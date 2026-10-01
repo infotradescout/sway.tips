@@ -16,6 +16,32 @@ try {
     CREATE TABLE performer_public_profiles(performer_id uuid PRIMARY KEY REFERENCES performers(id),headline text,city text,updated_at timestamptz DEFAULT now());
     CREATE TABLE audit_events(event_id uuid PRIMARY KEY,actor_type text,actor_id uuid,entity_type text,entity_id uuid,event_type text,metadata jsonb);`);
   await pg.exec(await readFile(new URL('../drizzle/0052_sway_reverse_osmosis.sql', import.meta.url), 'utf8'));
+  // Compare the applied PostgreSQL catalog with generator metadata, not SQL text.
+  // Future generated DROP/ALTER commands must address constraints that really exist.
+  const snapshot = JSON.parse(await readFile(new URL('../drizzle/meta/0052_snapshot.json', import.meta.url), 'utf8'));
+  const actionCodes: Record<string,string> = {'no action':'a',restrict:'r',cascade:'c','set null':'n','set default':'d'};
+  for (const name of ['sway_ro_business_bindings', 'sway_ro_proposals', 'sway_ro_approvals', 'sway_ro_operations']) {
+    const table = snapshot.tables[`public.${name}`];
+    const { rows } = await pg.query<{name:string;type:string;columns:string[];reference:string;referenced_columns:string[];delete_action:string;update_action:string}>(`
+      SELECT c.conname::text AS name, c.contype::text AS type,
+        ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(num,pos)
+          JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY k.pos) AS columns,
+        target.relname::text AS reference,
+        ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY k(num,pos)
+          JOIN pg_attribute a ON a.attrelid=c.confrelid AND a.attnum=k.num ORDER BY k.pos) AS referenced_columns,
+        c.confdeltype::text AS delete_action, c.confupdtype::text AS update_action
+      FROM pg_constraint c JOIN pg_class original ON original.oid=c.conrelid
+        LEFT JOIN pg_class target ON target.oid=c.confrelid
+      WHERE original.relname=$1 AND c.contype IN ('f','u') ORDER BY c.conname`, [name]);
+    const expected = [
+      ...Object.values(table.foreignKeys).map((fk: any) => ({name:fk.name,type:'f',columns:fk.columnsFrom,
+        reference:fk.tableTo,referenced_columns:fk.columnsTo,
+        delete_action:actionCodes[fk.onDelete],update_action:actionCodes[fk.onUpdate]})),
+      ...Object.values(table.uniqueConstraints).map((unique: any) => ({name:unique.name,type:'u',columns:unique.columns}))
+    ].sort((a,b) => a.name.localeCompare(b.name));
+    const actual = rows.map(row => row.type === 'f' ? row : ({name:row.name,type:row.type,columns:row.columns}));
+    assert.deepEqual(actual, expected, `${name}: applied constraints must match the migration snapshot`);
+  }
   await pg.query('INSERT INTO users VALUES($1),($2)', [owner, stranger]);
   await pg.query('INSERT INTO performers(id,owner_user_id,bio) VALUES($1,$2,$3)', [performer,owner,'original']);
   await pg.query(`INSERT INTO sway_ro_business_bindings(id,performer_id,owner_id,business_id,tenant_id,provider,account_id,asset_kind,provider_verified,owner_authorized,verified_at,expires_at,revision,evidence_reference)
