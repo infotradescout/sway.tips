@@ -91,7 +91,8 @@
     "test:behavior:performer-account-reads": "node scripts/sway-performer-account-reads.behavior.test.mjs",
     "test:integration:affiliate-program": "node --import tsx scripts/sway-affiliate-program.integration.test.ts",
     "test:profile-layout": "node --import tsx scripts/sway-public-profile-layout.behavior.test.ts && node --import tsx scripts/sway-public-profile-layout.integration.test.mjs && node scripts/sway-public-profile-layout.browser.test.mjs",
-    "test:integration:friend-publication": "node --import tsx scripts/sway-friend-publication-guards.integration.test.mjs && node --import tsx scripts/sway-friend-publication.integration.test.mjs"
+    "test:integration:friend-publication": "node --import tsx scripts/sway-friend-publication-guards.integration.test.mjs && node --import tsx scripts/sway-friend-publication.integration.test.mjs",
+    "test:reverse-osmosis": "node --import tsx scripts/sway-reverse-osmosis-native.integration.test.ts && node --import tsx scripts/sway-reverse-osmosis-http.integration.test.ts && node scripts/sway-reverse-osmosis-ui.browser.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1092.0",

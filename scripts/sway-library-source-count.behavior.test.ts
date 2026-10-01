@@ -12,6 +12,10 @@ const proof = await startEmbeddedPostgresProof('library_source_counts');
 const sessions = createPerformerSessionStore({ databaseUrl: proof.databaseUrl, dbOverride: createSwayDb(proof.databaseUrl) });
 let child: ReturnType<typeof spawn> | undefined;
 let failed = false;
+let startupOutput = '';
+const redactStartupOutput = (value: string) => value
+  .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
+  .replace(/((?:token|secret|password|api[_-]?key)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]');
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 try {
   const listener = createServer();
@@ -26,8 +30,14 @@ try {
       SWAY_PAYPAL_PAYOUTS_ENABLED: 'false', SWAY_PAYPAL_PAYOUT_LIVE_EXECUTION_ENABLED: 'false',
       STRIPE_SECRET_KEY: '', STRIPE_PUBLISHABLE_KEY: '', VITE_STRIPE_PUBLISHABLE_KEY: '', STRIPE_WEBHOOK_SECRET: '',
       SWAY_EMAIL_PROVIDER: '', SWAY_EMAIL_API_KEY: '', SWAY_EMAIL_FROM: '' },
-    stdio: ['ignore', 'ignore', 'ignore']
+    stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
   });
+  // Keep a bounded diagnostic tail; expose it only after a failed proof.
+  const captureStartup = (chunk: Buffer) => {
+    startupOutput = (startupOutput + chunk.toString()).slice(-8192);
+  };
+  child.stdout?.on('data', captureStartup);
+  child.stderr?.on('data', captureStartup);
   let ready = false;
   for (let attempt = 0; attempt < 300; attempt++) {
     assert.equal(child.exitCode, null, 'Owned local server must remain running');
@@ -72,6 +82,7 @@ try {
 } catch (error) {
   failed = true;
   console.error('Source count API behavior failed:', error);
+  if (startupOutput) console.error('Owned local server startup output:', redactStartupOutput(startupOutput));
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {
     child.kill('SIGTERM');
