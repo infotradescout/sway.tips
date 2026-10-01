@@ -8,8 +8,8 @@ import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
 import {npmCiInvocation} from './grindzone-npm-command.mjs';
-export const sourceSha='b237524f5ef81f653488e1d86b8a5b80b0cc9a3d';
-export const downloadSourceSha='b237524f5ef81f653488e1d86b8a5b80b0cc9a3d';
+export const sourceSha='3e036d7c057a7cbf324907900b969bfea7b5fd5c';
+export const downloadSourceSha='3e036d7c057a7cbf324907900b969bfea7b5fd5c';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -71,6 +71,13 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   console.log('GRINDZONE_NATIVE_TESTS_PASSED '+downloadSourceSha);
   run(hostRoot,process.execPath,['node_modules/playwright/cli.js','install','chromium']);
   const evidence=path.join(target,'phone-acceptance');
+  // Actual isolated journal flow; bind its receipt to this exact checkout before packaging.
+  const countsEvidence=path.join(evidence,'phone-counts');
+  run(target,process.execPath,['tools/verify-phone-counts-browser.mjs',hostRoot,countsEvidence]);
+  const countsReport=JSON.parse(readFileSync(path.join(countsEvidence,'http-browser-acceptance.json'),'utf8'));
+  const countsMembers=['public/browser-journal.js','public/browser-play.js','public/browser-play.css','cloud/browser-play.mjs','public/browser-journal-storage.js','tests/browser-journal-summary.test.mjs','tools/verify-phone-counts-browser.mjs'];
+  if(countsReport.passed!==true||countsReport.sourceHead!==downloadSourceSha||countsReport.physicalPhoneVerified!==false||countsReport.productionOrCustomerAccess!==false||countsReport.checks?.length!==7)throw Error('Phone medal-count acceptance is incomplete or stale');
+  for(const name of countsMembers)if(countsReport.sourceMembers?.[name]!==createHash('sha256').update(readFileSync(path.join(target,name))).digest('hex'))throw Error('Phone medal-count proof source mismatch: '+name);
   run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-population-insights.mjs',path.join(evidence,'insights')]);
   run(target,process.execPath,['tools/verify-insights-refresh.mjs',target,'candidate',path.join(evidence,'insights-refresh')]);
@@ -120,6 +127,8 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const {zipEntry}=await import(pathToFileURL(path.join(target,'tools/build-windows-download.mjs')).href);
   verifyNativePortableMetadata(JSON.parse(zipEntry(bytes,'GrindZone/PORTABLE-PACKAGE.json').toString('utf8')),downloadSourceSha);
   const published=path.resolve('dist/grindzone-download');mkdirSync(published,{recursive:true});
+  // Preserve only the bounded synthetic proof receipt; private backup fixture stays in test output.
+  copyFileSync(path.join(countsEvidence,'http-browser-acceptance.json'),path.join(published,'local-phone-counts.json'));
   copyFileSync(archive,path.join(published,manifest.filename));copyFileSync(path.join(download,'release.json'),path.join(published,'release.json'));
   for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play','harvest-intake']){
     const report=path.join(evidence,mode+'-'+kind+'.json');
