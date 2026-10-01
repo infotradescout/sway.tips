@@ -9,3 +9,5 @@ artifacts/
 *.log
 .env*
 !.env.example
+!vendor/infinity-reverse-osmosis/dist/
+!vendor/infinity-reverse-osmosis/dist/**

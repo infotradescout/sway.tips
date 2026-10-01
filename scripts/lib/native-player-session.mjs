@@ -11,7 +11,7 @@ const poisoned = new WeakSet();
 const inFlight = new WeakMap();
 export function newNativePlayerJournal(actorId) {
   if (typeof actorId !== 'string' || !actorId.trim() || actorId.length > 200) throw new Error('An authorized owner is required.');
-  return { version: 1, actorId, connections: {}, bindings: {},
+  return { version: 1, actorId, windowsPipeIdentityVersion: 1, connections: {}, bindings: {},
     execution: { version: 1, bridgeInstanceId: randomUUID(), outcomes: {}, pendingCompletionIds: [] } };
 }
 export function validateNativePlayerJournal(value, actorId) {
@@ -19,6 +19,9 @@ export function validateNativePlayerJournal(value, actorId) {
     throw new Error('Native player journal is corrupt or belongs to another owner.');
   }
   validateExecutionLedger(value.execution);
+  if (owns(value, 'windowsPipeIdentityVersion') && value.windowsPipeIdentityVersion !== 1) {
+    throw new Error('Unsupported Windows pipe identity provenance.');
+  }
   for (const [id, connection] of Object.entries(value.connections)) {
     assertUuid(id); assertUuid(connection?.revision);
     if (!record(connection) || !SHA256.test(connection.targetKey)) throw new Error('Invalid durable target binding.');
@@ -37,6 +40,14 @@ export function validateNativePlayerJournal(value, actorId) {
   return value;
 }
 
+export function assertNativePlayerTargetIdentity(player, journal) {
+  // Old Windows mpv hashes may hide an unresolved alias even under a new ID.
+  // Never stamp old history as canonical or reset it implicitly on startup.
+  if (process.platform === 'win32' && player.target.program === 'mpv' && journal.windowsPipeIdentityVersion !== 1) {
+    throw new Error('Preserve the existing journal; Windows mpv needs a supervised migration before this helper can open it.');
+  }
+}
+
 // The host must authorize actorId before constructing this session. This module
 // does not replace Sway's performer/room authorization. The host must also own an
 // exclusive journal-file lock for the session lifetime (see native-player-store).
@@ -44,6 +55,7 @@ export class NativePlayerSession {
   constructor({ player, actorId, connectionId, journal, persist }) {
     assertUuid(connectionId);
     validateNativePlayerJournal(journal, actorId);
+    assertNativePlayerTargetIdentity(player, journal);
     if (typeof persist !== 'function' || persist.constructor.name === 'AsyncFunction') throw new Error('Synchronous durable storage is required.');
     this.player = player; this.actorId = actorId; this.connectionId = connectionId; this.journal = journal; this.persist = persist;
     const existing = journal.connections[connectionId];

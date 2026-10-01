@@ -1,0 +1,11 @@
+{
+  "package": "@tradescout-infinity/reverse-osmosis",
+  "version": "0.1.0",
+  "repository": "infotradescout/tradescout-infinity",
+  "revision": "b5cdef4187b9e21981c7bf004fb15fd34edd73cf",
+  "archiveSha256": "af2c8c9eda9af99d257f403f5bff9365fcbbfd30403098283f8c1e0df393185a",
+  "sourceSha256": "ec55ed710765928b639f6be96b52379b45f5849b54f4396ff67c7e47f0a7fcd6",
+  "compiledEntrySha256": "877e44dc00279aebf8da8db884c1e487da5c599f3bd5e4cfd4755dcff8206b53",
+  "adoption": "Unchanged owner-reviewed archive, imported directly by Sway. No duplicated business policy or new hosted Infinity service.",
+  "upgradeOwner": "Infinity core owner with coordinated native-adapter compatibility review"
+}

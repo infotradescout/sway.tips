@@ -14,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid
 } from 'drizzle-orm/pg-core';
@@ -315,6 +316,7 @@ export const performers = pgTable('performers', {
   handle: text('handle'),
   displayName: text('display_name').notNull(),
   bio: text('bio'),
+  publicProfileRevision: integer('public_profile_revision').notNull().default(0),
   isActive: boolean('is_active').notNull().default(false),
   visibilityState: performerVisibilityStateEnum('visibility_state').notNull().default('draft'),
   onboardingStatus: performerOnboardingStatusEnum('onboarding_status').notNull().default('created'),
@@ -604,6 +606,58 @@ export const performerPublicProfiles = pgTable('performer_public_profiles', {
 }, (table) => ({
   updatedAtIdx: index('performer_public_profiles_updated_at_idx').on(table.updatedAt)
 }));
+
+// Connector-owned business evidence. Ordinary social URLs never create these bindings.
+export const swayRoBusinessBindings = pgTable('sway_ro_business_bindings', {
+  id: uuid('id').primaryKey(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  businessId: text('business_id').notNull(),
+  tenantId: text('tenant_id').notNull(),
+  provider: text('provider').notNull(),
+  accountId: text('account_id').notNull(),
+  assetKind: text('asset_kind').notNull(),
+  providerVerified: boolean('provider_verified').notNull(),
+  ownerAuthorized: boolean('owner_authorized').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revoked: boolean('revoked').notNull().default(false),
+  revision: text('revision').notNull(),
+  evidenceReference: text('evidence_reference').notNull()
+}, (table) => ({ assetUnique: unique('sway_ro_business_bindings_performer_id_provider_account_id_key').on(table.performerId, table.provider, table.accountId) }));
+
+export const swayRoProposals = pgTable('sway_ro_proposals', {
+  id: uuid('id').primaryKey(),
+  bindingId: uuid('binding_id').notNull().references(() => swayRoBusinessBindings.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  actorId: uuid('actor_id').notNull().references(() => users.id),
+  operationKey: text('operation_key').notNull().unique(),
+  payloadDigest: text('payload_digest').notNull(),
+  proposal: jsonb('proposal').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+});
+
+export const swayRoApprovals = pgTable('sway_ro_approvals', {
+  id: uuid('id').primaryKey(),
+  proposalId: uuid('proposal_id').notNull().unique().references(() => swayRoProposals.id),
+  actorId: uuid('actor_id').notNull().references(() => users.id),
+  approval: jsonb('approval').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+});
+
+export const swayRoOperations = pgTable('sway_ro_operations', {
+  operationKey: text('operation_key').primaryKey(),
+  proposalId: uuid('proposal_id').notNull().unique().references(() => swayRoProposals.id),
+  payloadDigest: text('payload_digest').notNull(),
+  approvalId: uuid('approval_id').notNull().references(() => swayRoApprovals.id),
+  claimToken: text('claim_token').notNull(),
+  status: text('status').notNull(),
+  receipt: jsonb('receipt'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({ statusAllowed: check('sway_ro_operations_status_check', sql`${table.status} in ('claimed','completed','held','denied','reflected','absent')`) }));
 
 // Curated, read-only profile previews are deliberately separate from performers.
 // A preview has no owner account, password, terms receipt, or private contact data.

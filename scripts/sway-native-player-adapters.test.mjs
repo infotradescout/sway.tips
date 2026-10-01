@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { playerCapabilities } from '../src/player-connections.mjs';
@@ -102,6 +102,96 @@ const ipcReply = (request, socket, data) => socket.write(JSON.stringify({ reques
 function session(player, journal = newNativePlayerJournal(owner), persist = () => {}) {
   return new NativePlayerSession({ player, actorId: owner, connectionId: randomUUID(), journal, persist });
 }
+
+test('Windows mpv pipe aliases share one target and preserve uncertainty', { skip: process.platform !== 'win32' }, async t => {
+  const fixture = await ipcPlayer(t, (_request, socket) => socket.destroy());
+  const aliasPath = fixture.socketPath.replace(/[^\\]+$/, value => value.toUpperCase());
+  const primary = createNativePlayerAdapter({ program: 'mpv', socketPath: fixture.socketPath });
+  const aliasPlayer = createNativePlayerAdapter({ program: 'mpv', socketPath: aliasPath });
+  assert.equal(primary.targetKey, aliasPlayer.targetKey, 'Windows resolves these aliases to the same original player');
+  assert.equal(new MpvPlayerControl({ socketPath: aliasPath.replace('\\pipe\\', '\\PIPE\\') }).endpoint, primary.adapter.endpoint);
+  const journal = newNativePlayerJournal(owner), first = session(primary, journal), alias = session(aliasPlayer, journal);
+  const receipt = await first.execute({ id: randomUUID(), revision: first.revision, action: 'next' });
+  assert.equal(receipt.result.executionStatus, 'unknown'); assert.equal(alias.describe().uncertain, true);
+  await assert.rejects(alias.execute({ id: randomUUID(), revision: alias.revision, action: 'pause' }), /explicitly review/);
+  assert.equal(fixture.calls.length, 1, 'An alias must not reach the same unresolved player a second time');
+});
+
+test('Windows mpv pipe aliases exclude another action while dispatch is in flight', { skip: process.platform !== 'win32' }, async t => {
+  let release, dispatched;
+  const ready = new Promise(resolve => { dispatched = resolve; });
+  const fixture = await ipcPlayer(t, (request, socket) => { release = () => ipcReply(request, socket, null); dispatched(); });
+  const journal = newNativePlayerJournal(owner);
+  const first = session(createNativePlayerAdapter({ program: 'mpv', socketPath: fixture.socketPath }), journal);
+  const alias = session(createNativePlayerAdapter({ program: 'mpv', socketPath: fixture.socketPath.toUpperCase() }), journal);
+  const pending = first.execute({ id: randomUUID(), revision: first.revision, action: 'pause' });
+  await ready;
+  try { await assert.rejects(alias.execute({ id: randomUUID(), revision: alias.revision, action: 'pause' }), /review|in flight/); }
+  finally { release(); }
+  assert.equal((await pending).success, true); assert.equal(fixture.calls.length, 1);
+});
+
+test('Windows mpv legacy journal cannot bypass uncertainty through old or new connection IDs', { skip: process.platform !== 'win32' }, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sway-mpv-legacy-'));
+  t.after(() => fs.rmSync(directory, { recursive: true }));
+  const filename = path.join(directory, 'journal.json');
+  const fixture = await ipcPlayer(t, (_request, socket) => socket.destroy());
+  const player = createNativePlayerAdapter({ program: 'mpv', socketPath: fixture.socketPath });
+  const store = openNativePlayerStore({ filename, actorId: owner });
+  const connection = session(player, store.journal, store.persist), commandId = randomUUID();
+  await connection.execute({ id: commandId, revision: connection.revision, action: 'next' });
+  // Faithfully model a pre-canonicalization durable journal; never a real mpv claim.
+  const legacyEndpoint = fixture.socketPath.replace(/[^\\]+$/, value => value.toUpperCase());
+  const legacyTargetKey = createHash('sha256').update(JSON.stringify({ ...player.target, endpoint: legacyEndpoint })).digest('hex');
+  store.journal.connections[connection.connectionId].targetKey = legacyTargetKey;
+  const binding = store.journal.bindings[commandId]; binding.targetKey = legacyTargetKey;
+  binding.fingerprint = createHash('sha256').update(JSON.stringify({ actorId: owner, connectionId: connection.connectionId,
+    revision: connection.revision, targetKey: legacyTargetKey, action: 'next' })).digest('hex');
+  delete store.journal.windowsPipeIdentityVersion; store.persist(); store.close();
+  const before = fs.readFileSync(filename), restored = openNativePlayerStore({ filename, actorId: owner });
+  try {
+    for (const connectionId of [connection.connectionId, randomUUID()]) assert.throws(() => new NativePlayerSession({
+      player, actorId: owner, connectionId, journal: restored.journal, persist: restored.persist,
+    }), /preserve.*journal.*supervised migration/i);
+    assert.throws(() => new NativePlayerHub({ actorId: owner, store: restored, configs: [
+      { id: randomUUID(), program: 'vlc', password: 'synthetic-test-key' },
+      { id: randomUUID(), program: 'mpv', socketPath: fixture.socketPath },
+    ] }), /supervised migration/i);
+    assert.deepEqual(fs.readFileSync(filename), before, 'Failed mixed-hub startup must leave durable history byte-identical');
+    assert.equal(Object.hasOwn(restored.journal, 'windowsPipeIdentityVersion'), false);
+    assert.equal(restored.journal.execution.outcomes[commandId].result.executionStatus, 'unknown');
+    assert.equal(fixture.calls.length, 1);
+  } finally { restored.close(); }
+});
+
+test('native journal validates a present Windows pipe identity marker strictly', () => {
+  assert.equal(newNativePlayerJournal(owner).windowsPipeIdentityVersion, 1);
+  for (const marker of [null, '1', true, 0, 2, undefined]) {
+    const journal = newNativePlayerJournal(owner); journal.windowsPipeIdentityVersion = marker;
+    assert.throws(() => validateNativePlayerJournal(journal, owner), /identity/i);
+  }
+});
+
+test('legacy VLC journals retain uncertain outcomes without Windows pipe migration', async () => {
+  const journal = newNativePlayerJournal(owner); delete journal.windowsPipeIdentityVersion;
+  const player = createNativePlayerAdapter({ program: 'vlc', password: 'synthetic-test-key' });
+  let calls = 0;
+  const connection = session({ ...player, adapter: { executeCommand: async () => { calls++; throw new Error('Synthetic lost reply'); } } }, journal);
+  const command = { id: randomUUID(), revision: connection.revision, action: 'pause' };
+  await connection.execute(command);
+  const before = JSON.stringify(journal);
+  const restored = new NativePlayerSession({ player, actorId: owner, connectionId: connection.connectionId, journal, persist: () => {} });
+  assert.equal((await restored.execute(command)).replay, true); assert.equal(restored.describe().uncertain, true);
+  assert.equal(JSON.stringify(journal), before); assert.equal(Object.hasOwn(journal, 'windowsPipeIdentityVersion'), false); assert.equal(calls, 1);
+});
+
+test('Unix mpv keeps case-sensitive targets and accepts legacy journals', { skip: process.platform === 'win32' }, () => {
+  const upper = createNativePlayerAdapter({ program: 'mpv', socketPath: '/tmp/SwayPlayer.sock' });
+  const lower = createNativePlayerAdapter({ program: 'mpv', socketPath: '/tmp/swayplayer.sock' });
+  assert.notEqual(upper.targetKey, lower.targetKey);
+  const journal = newNativePlayerJournal(owner); delete journal.windowsPipeIdentityVersion;
+  assert.doesNotThrow(() => session(upper, journal));
+});
 
 // Protocol servers below are controlled fixtures, not installed VLC/mpv.
 test('native factory keeps accounts and MIDI separate and does not invent adapters', () => {

@@ -21,6 +21,8 @@ import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerHandleClaims, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutKycReviews, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
+import { registerSwayReverseOsmosisRoutes } from "./src/server/reverse-osmosis-routes";
+import type { ReverseOsmosisDatabase } from "./src/server/reverse-osmosis-native";
 import {
   evaluateReleaseHealth,
   loadExpectedMigrations
@@ -2409,11 +2411,7 @@ async function persistBusinessStateForRoom(roomState: BackendState, gigId: strin
 }
 
 async function resolveLegacyWritableRoom(req: express.Request, res: express.Response) {
-  if (skipStartupBusinessStateHydration) {
-    console.warn('[sway.startup] skipping live-room state hydration for a non-production HTTP proof.');
-  } else {
-    await refreshBusinessState();
-  }
+  await refreshBusinessState();
 
   const requestedGigId = parseDurableGigId(req.body?.gig_id);
   const targetGigId = requestedGigId ?? activeGigId;
@@ -2920,6 +2918,7 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       displayName: performers.displayName,
       handle: performers.handle,
       bio: performers.bio,
+      publicProfileRevision: performers.publicProfileRevision,
       visibilityState: performers.visibilityState,
       isActive: performers.isActive,
       onboardingStatus: performers.onboardingStatus,
@@ -10094,6 +10093,13 @@ app.post('/api/talent/profile/layout', async (req, res) => {
   }
 });
 
+registerSwayReverseOsmosisRoutes(app, {
+  externalOrigin: CANONICAL_APP_ORIGIN,
+  database: () => businessDb as unknown as ReverseOsmosisDatabase | null,
+  requireTalentAccess: (req) => accessControl.requireTalentAccess(req),
+  loadOwnedPerformer: loadOwnedPerformerByActorUserId
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -10167,6 +10173,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
+      nativeVersion: String(performerOwner.publicProfileRevision),
       visibilityState: performerOwner.visibilityState,
       publicVisibility,
       headline: profileRow?.headline ?? null,
@@ -10435,7 +10442,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
   const savedLinks = await businessDb.transaction(async (tx) => {
     const now = new Date();
     const [lockedPerformer] = await tx
-      .select({ performerId: performers.id })
+      .select({ performerId: performers.id, publicProfileRevision: performers.publicProfileRevision })
       .from(performers)
       .where(and(
         eq(performers.id, performerOwner.performerId),
@@ -10444,6 +10451,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
       .for('update')
       .limit(1);
     if (!lockedPerformer) return null;
+    if (req.body?.expectedNativeVersion !== undefined && req.body.expectedNativeVersion !== String(lockedPerformer.publicProfileRevision)) return false as const;
     const [existingProfile] = await tx
       .select({ metadata: performerPublicProfiles.metadata })
       .from(performerPublicProfiles)
@@ -10458,7 +10466,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
     await tx
       .update(performers)
-      .set({ bio, updatedAt: now })
+      .set({ bio, publicProfileRevision: sql`${performers.publicProfileRevision} + 1`, updatedAt: now })
       .where(eq(performers.id, performerOwner.performerId));
 
     await tx
@@ -10552,9 +10560,10 @@ app.post('/api/talent/profile/public', async (req, res) => {
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
 
-    return { links, metadata: nextMetadata };
+    return { links, metadata: nextMetadata, nativeVersion: String(lockedPerformer.publicProfileRevision + 1) };
   });
 
+  if (savedLinks === false) return res.status(409).json({ error: 'This profile changed. Reload it before saving your edits.' });
   if (!savedLinks) return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
 
   return res.status(202).json({
@@ -10564,6 +10573,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio,
+      nativeVersion: savedLinks.nativeVersion,
       visibilityState: performerOwner.visibilityState,
       headline,
       stageName: normalizePublicProfileText(
@@ -16633,7 +16643,11 @@ async function startServer() {
     audioObjectStoreVerified = true;
     console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
   }
-  await refreshBusinessState();
+  if (skipStartupBusinessStateHydration) {
+    console.warn('[sway.startup] skipping live-room state hydration for a non-production HTTP proof.');
+  } else {
+    await refreshBusinessState();
+  }
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
   startPerformerPayoutWorker();
@@ -16726,7 +16740,7 @@ async function startServer() {
   const httpServer = createHttpServer(phoneHost ? phoneHost.wrap(app) : app);
   phoneHost?.attach(httpServer);
   httpServer.once('error', () => { void phoneHost?.close(); });
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, process.env.NODE_ENV === 'test' ? '127.0.0.1' : '0.0.0.0', () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 import { sendShareLinkCopied, sendDiscoveryEvent } from '../src/shells/frictionClient.ts';
 
@@ -12,13 +13,35 @@ for (const key of ['DATABASE_URL','TEST_DATABASE_URL','SWAY_REAL_POSTGRES_PROOF_
   assert(!process.env[key], 'Ingestion regression cannot inherit credentials: ' + key);
 }
 assert.notEqual(process.env.SWAY_REQUIRE_REAL_POSTGRES_PROOF, 'true');
-const output = path.resolve('tmp/public-entry-qa/discovery-ingestion');
+const root = fileURLToPath(new URL('../', import.meta.url));
+const output = path.resolve(root, 'tmp/public-entry-qa/discovery-ingestion');
 fs.mkdirSync(output, { recursive: true });
-const report = { result: 'fail', cases: [], productionWrites: 0, scope: 'Real server.ts telemetry route, real client helpers, and a fresh PGlite-backed audit store over loopback PostgreSQL protocol. Browser globals are fixtures; not production ingestion, standalone concurrency, human traffic, or revenue.' };
+const report = { result: 'fail', cases: [], productionWrites: 0, scope: 'Real server.ts via Node/TSX ESM-only loader, real client helpers, and a fresh PGlite-backed audit store over loopback PostgreSQL protocol. Browser globals are fixtures; not production ingestion, standalone concurrency, human traffic, or revenue.' };
 const originalFetch = globalThis.fetch;
 const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-let database, child, serverLog = '';
+let database, child, serverLog = '', childClosed;
+const lifecycle = { pid: null, spawnError: null, exit: null, close: null, stdoutBytes: 0, stderrBytes: 0, outputTruncated: false, lastProbe: null, cleanup: null };
+const secrets = new Set();
+function redact(value) {
+  let text = String(value);
+  for (const secret of [...secrets].filter(Boolean).sort((a, b) => b.length - a.length)) text = text.split(secret).join('[REDACTED]');
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, '[REDACTED_URI]')
+    .replace(/((?:password|passwd|pwd|token|secret|authorization|api[_-]?key)\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1[REDACTED]');
+}
+function capture(stream, chunk) {
+  lifecycle[stream + 'Bytes'] += chunk.length;
+  if (lifecycle.outputTruncated) return;
+  // Join before redaction; omit all text on overflow rather than secret fragments.
+  if (serverLog.length + chunk.length > 262144) { serverLog = ''; lifecycle.outputTruncated = true; return; }
+  serverLog += chunk.toString();
+}
+async function waitForClose(milliseconds) {
+  if (!child || lifecycle.close) return true;
+  let timer;
+  try { return await Promise.race([childClosed.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), milliseconds); })]); }
+  finally { clearTimeout(timer); }
+}
 function restoreGlobal(name, descriptor) {
   if (descriptor) Object.defineProperty(globalThis, name, descriptor);
   else delete globalThis[name];
@@ -33,28 +56,43 @@ try {
   assert.equal(database.kind, 'embedded-postgres');
   const target = new URL(database.databaseUrl);
   assert.equal(target.hostname, '127.0.0.1');
+  for (const value of [database.databaseUrl, target.password, decodeURIComponent(target.password), encodeURIComponent(target.password), encodeURIComponent(decodeURIComponent(target.password))]) secrets.add(value);
   const reservation = net.createServer();
   await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const origin = 'http://127.0.0.1:' + port;
-  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
-    cwd: process.cwd(),
+  child = spawn(process.execPath, ['--import', 'tsx/esm', 'server.ts'], {
+    cwd: root,
     env: { ...process.env, NODE_ENV: 'test', PORT: String(port), HOST: '127.0.0.1', DATABASE_URL: database.databaseUrl, SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION: 'true' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  child.stdout.on('data', data => { serverLog = (serverLog + data).slice(-20000); });
-  child.stderr.on('data', data => { serverLog = (serverLog + data).slice(-20000); });
+  childClosed = new Promise(resolve => child.once('close', (code, signal) => { lifecycle.close = { code, signal }; resolve(); }));
+  lifecycle.pid = child.pid ?? null;
+  child.once('error', error => { lifecycle.spawnError = { code: error.code ?? null, message: redact(error.message) }; });
+  child.once('exit', (code, signal) => { lifecycle.exit = { code, signal }; });
+  child.stdout.on('data', data => capture('stdout', data));
+  child.stderr.on('data', data => capture('stderr', data));
   let ready = false;
-  for (let attempt = 0; attempt < 150; attempt++) {
-    if (child.exitCode !== null || child.signalCode !== null) break;
+  // Match the bounded source-startup budget used by acquisition quality: cold
+  // Node/TSX imports can exceed the old 150 immediate-failure polling attempts.
+  const startupStarted = performance.now();
+  const startupDeadline = startupStarted + 90_000;
+  let startupAttempts = 0;
+  while (performance.now() < startupDeadline) {
+    if (lifecycle.spawnError || child.exitCode !== null || child.signalCode !== null) break;
+    startupAttempts++;
+    const probeTimeout = Math.max(1, Math.floor(Math.min(1000, startupDeadline - performance.now())));
     try {
-      const response = await originalFetch(origin + '/api/build-marker', { signal: AbortSignal.timeout(1000) });
-      if (response.ok && (response.headers.get('content-type') || '').includes('json')) { ready = true; break; }
-    } catch { /* The owned server may still be starting. */ }
-    await delay(200);
+      const response = await originalFetch(origin + '/api/build-marker', { signal: AbortSignal.timeout(probeTimeout) });
+      lifecycle.lastProbe = { status: response.status, json: (response.headers.get('content-type') || '').includes('json') };
+      if (performance.now() < startupDeadline && response.ok && (response.headers.get('content-type') || '').includes('json')) { ready = true; break; }
+    } catch (error) { lifecycle.lastProbe = { errorName: error.name, errorCode: error.cause?.code ?? null }; }
+    const remaining = startupDeadline - performance.now();
+    if (remaining > 0) await delay(Math.min(200, remaining));
   }
-  assert(ready, 'Owned application did not start: ' + serverLog);
+  report.startup = { pid: child.pid ?? null, budgetMs: 90_000, elapsedMs: Math.round(performance.now() - startupStarted), attempts: startupAttempts, ready };
+  assert(ready, 'Owned ESM source application did not start');
   for (const denied of [false, true]) {
     const local = storage(), session = storage();
     const win = { location: { pathname: '/talent/gigs', search: '' } };
@@ -107,21 +145,25 @@ try {
       const afterInvalid = await database.query(`SELECT count(*)::int AS count FROM audit_events WHERE metadata->>'journey_id' = $1 AND event_type IN ('discovery_landing', 'discovery_primary_action')`, [journeyId]);
       assert.equal(afterInvalid.rows[0].count, 2, 'Rejected private paths cannot enter the public funnel');
       row.persistedPublicEvents = 2; row.rejectedPrivateEntryStatus = 400; row.passed = true;
-    } catch (error) { row.error = String(error.stack || error); }
+    } catch (error) { row.error = redact(error.stack || error); }
     finally { report.cases.push(row); console.log('DISCOVERY_INGESTION_CASE ' + JSON.stringify(row)); }
   }
   assert.equal(report.cases.length, 2);
   assert(report.cases.every(row => row.passed), 'Private-to-public ingestion regression failed');
   report.result = 'pass';
-} catch (error) { report.error = String(error.stack || error); }
+} catch (error) { report.error = redact(error.stack || error); }
 finally {
   globalThis.fetch = originalFetch; restoreGlobal('window', previousWindow); restoreGlobal('document', previousDocument);
-  if (child && child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise(resolve => child.once('exit', resolve));
-    child.kill('SIGTERM');
-    for (let attempt = 0; attempt < 50 && child.exitCode === null && child.signalCode === null; attempt++) await delay(100);
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    await exited;
+  if (child) {
+    if (!lifecycle.spawnError && child.exitCode === null && child.signalCode === null) {
+      lifecycle.cleanup = { termSent: child.kill('SIGTERM'), killSent: false, closed: false };
+      if (!await waitForClose(5000) && child.exitCode === null && child.signalCode === null) lifecycle.cleanup.killSent = child.kill('SIGKILL');
+    }
+    const closed = await waitForClose(5000);
+    lifecycle.cleanup = { ...lifecycle.cleanup, closed };
+    if (!closed) { report.result = 'fail'; report.error = redact((report.error || '') + ' Owned server close was not observed within bounded cleanup.'); }
+    report.serverLifecycle = lifecycle;
+    if (report.result !== 'pass') report.serverTail = redact(serverLog).slice(-4000);
   }
   await database?.close();
   report.finishedAt = new Date().toISOString();

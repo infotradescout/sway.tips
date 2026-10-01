@@ -13,6 +13,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
 import { PerformerVisibilityControl } from './PerformerVisibilityControl';
+import PerformerReverseOsmosis from './PerformerReverseOsmosis';
 
 type LinkDraft = {
   key: string;
@@ -114,6 +115,10 @@ function ScopedPerformerPublicProfileEditor({
   previewMode = false
 }: ProfileEditorProps) {
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState<string | null>(null);
+  const [nativeVersion, setNativeVersion] = useState<string | null>(null);
+  const [loadedPerformerHandle, setLoadedPerformerHandle] = useState<string | null>(null);
+  const [syncRevision, setSyncRevision] = useState(0);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const operationScope = useRef<ProfileEditorScope | null>(null);
@@ -167,6 +172,9 @@ function ScopedPerformerPublicProfileEditor({
     scope.controller.abort();
     setProfileLoaded(false);
     setForm(EMPTY_FORM);
+    setSavedFormSnapshot(null);
+    setNativeVersion(null);
+    setLoadedPerformerHandle(null);
     setPartner({
       granted: false, active: false, accepted: false, suspended: false,
       acceptanceRequired: false, termsVersion: null, termsHash: null, termsText: null
@@ -204,12 +212,15 @@ function ScopedPerformerPublicProfileEditor({
         }
 
         const profile = data.profile;
+        if (performerHandle && profile.handle !== performerHandle) throw new Error('Reload the intended performer profile before editing.');
+        setLoadedPerformerHandle(typeof profile.handle === 'string' ? profile.handle : null);
+        setNativeVersion(typeof profile.nativeVersion === 'string' ? profile.nativeVersion : null);
         const roles = Array.isArray(profile.roles)
           ? profile.roles.filter((role: unknown): role is string => typeof role === 'string')
           : text(profile.primaryRole)
             ? [text(profile.primaryRole)]
             : [];
-        setForm({
+        const nextForm: ProfileForm = {
           roles,
           stageName: text(profile.stageName),
           headline: text(profile.headline),
@@ -235,7 +246,9 @@ function ScopedPerformerPublicProfileEditor({
                 isActive: link.isActive !== false
               }))
             : []
-        });
+        };
+        setForm(nextForm);
+        setSavedFormSnapshot(JSON.stringify(nextForm));
         setPartner({
           granted: profile.partner?.granted === true,
           active: profile.partner?.active === true,
@@ -325,6 +338,7 @@ function ScopedPerformerPublicProfileEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roles: form.roles,
+          ...(nativeVersion !== null ? { expectedNativeVersion: nativeVersion } : {}),
           primaryRole: form.roles[0] || null,
           stageName: form.stageName,
           headline: form.headline,
@@ -361,9 +375,13 @@ function ScopedPerformerPublicProfileEditor({
       const data = await response.json().catch(() => null);
       if (!isCurrentScope(scope)) return;
       if (!response.ok) {
+        if (response.status === 409) { setProfileLoaded(false); setSavedFormSnapshot(null); setNativeVersion(null); }
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save your public page.');
       }
       setStatus('success');
+      setSavedFormSnapshot(JSON.stringify(form));
+      if (typeof data?.profile?.nativeVersion === 'string') setNativeVersion(data.profile.nativeVersion);
+      setSyncRevision((revision) => revision + 1);
       setMessage('Public page saved.');
       window.dispatchEvent(new Event('sway:performer-profile-updated'));
     } catch (error) {
@@ -712,6 +730,11 @@ function ScopedPerformerPublicProfileEditor({
           {status === 'loading' ? 'Loading page...' : status === 'saving' ? 'Saving page...' : 'Save public page'}
         </button>
       </form>
+      {!previewMode && profileLoaded && status !== 'saving' ? (
+        savedFormSnapshot === JSON.stringify(form)
+          ? <PerformerReverseOsmosis performerHandle={loadedPerformerHandle} profileRevision={`${nativeVersion}:${syncRevision}:${loadAttempt}`} onApplied={() => setLoadAttempt((attempt) => attempt + 1)} />
+          : <p className="mt-6 text-sm text-slate-400">Save your profile edits before reviewing business account updates.</p>
+      ) : null}
     </section>
   );
 }
