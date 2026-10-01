@@ -184,7 +184,7 @@ test('relative and rooted Windows metadata paths are hidden by both browser boun
   const [connection] = await viaHost.list();
   const viaClient = new NativePlayerClient({ pairingKey: token,
     fetchImpl: async () => new Response(JSON.stringify({ state: observed() })) });
-  for (const path of ['private\\music\\secret.mp3', '\\private\\music\\secret.mp3', 'C:\\private\\music\\secret.mp3', '/private/music/secret.mp3']) {
+  for (const path of ['private\\music\\secret.mp3', '\\private\\music\\secret.mp3', 'C:\\private\\music\\secret.mp3', '/private/music/secret.mp3', 'C:secret.mp3', 'Displayed from C:private.mp3']) {
     title = artist = path;
     const raw = await (await fetch(`http://127.0.0.1:${host.port}/v1/state?connectionId=${item.id}&revision=${item.revision}`,
       { headers: { origin, authorization: 'Bearer ' + token } })).json();
@@ -194,7 +194,7 @@ test('relative and rooted Windows metadata paths are hidden by both browser boun
       assert.equal(value.trackTitle, null); assert.equal(value.trackArtist, null);
     }
   }
-  title = 'A public track title'; artist = 'A public artist';
+  title = 'Live: A public track title'; artist = 'A public artist';
   for (const client of [viaHost, viaClient]) {
     const value = await client.state(connection);
     assert.equal(value.trackTitle, title); assert.equal(value.trackArtist, artist);

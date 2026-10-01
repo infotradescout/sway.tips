@@ -5,7 +5,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const HASH = /^[a-f0-9]{64}$/;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const metadata = value => typeof value === 'string' && value.length <= 500
-  && !/(?:[\\/]|file:|https?:|[\x00-\x1f])/i.test(value) ? value : null;
+  && !/(?:\b[a-z]:|[\\/]|file:|https?:|[\x00-\x1f])/i.test(value) ? value : null;
 export function parseNativeConnection(value) {
   if (!object(value) || !UUID.test(value.id) || !UUID.test(value.revision) || !HASH.test(value.targetKey)) throw new Error('Unreadable native connection identity.');
   const capabilities = playerCapabilities(value.program);
