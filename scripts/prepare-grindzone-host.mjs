@@ -8,8 +8,8 @@ import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
 import {npmCiInvocation} from './grindzone-npm-command.mjs';
-export const sourceSha='c3af225fc299c45822f4c62eaa69fb69df4cbabf';
-export const downloadSourceSha='c3af225fc299c45822f4c62eaa69fb69df4cbabf';
+export const sourceSha='b237524f5ef81f653488e1d86b8a5b80b0cc9a3d';
+export const downloadSourceSha='b237524f5ef81f653488e1d86b8a5b80b0cc9a3d';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -73,6 +73,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const evidence=path.join(target,'phone-acceptance');
   run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-population-insights.mjs',path.join(evidence,'insights')]);
+  run(target,process.execPath,['tools/verify-insights-refresh.mjs',target,'candidate',path.join(evidence,'insights-refresh')]);
   run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'local',evidence]);
   await browserPlayPreview(evidence,'local');
   run(target,process.execPath,['tools/verify-harvest-intake.mjs',hostRoot,'local',evidence]);
