@@ -8,10 +8,10 @@ import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
 import {npmCiInvocation} from './grindzone-npm-command.mjs';
-export const sourceSha='3e036d7c057a7cbf324907900b969bfea7b5fd5c';
-export const downloadSourceSha='3e036d7c057a7cbf324907900b969bfea7b5fd5c';
+export const sourceSha='16fed8c67552e96b79f9925e410579e7d048b067';
+export const downloadSourceSha='16fed8c67552e96b79f9925e410579e7d048b067';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
-const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
+const run=(cwd,command,args,publicEnv={})=>execFileSync(command,args,{cwd,env:{...cleanEnv,...publicEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
   const target=path.resolve('node_modules',directory,sha);
   if(!existsSync(target)){mkdirSync(target,{recursive:true});run(target,'git',['init','--quiet']);run(target,'git',['fetch','--quiet','--depth','1','https://github.com/infotradescout/cotw-field-companion.git',sha]);run(target,'git',['checkout','--quiet','--detach','FETCH_HEAD']);}
@@ -78,6 +78,17 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const countsMembers=['public/browser-journal.js','public/browser-play.js','public/browser-play.css','cloud/browser-play.mjs','public/browser-journal-storage.js','tests/browser-journal-summary.test.mjs','tools/verify-phone-counts-browser.mjs'];
   if(countsReport.passed!==true||countsReport.sourceHead!==downloadSourceSha||countsReport.physicalPhoneVerified!==false||countsReport.productionOrCustomerAccess!==false||countsReport.checks?.length!==7)throw Error('Phone medal-count acceptance is incomplete or stale');
   for(const name of countsMembers)if(countsReport.sourceMembers?.[name]!==createHash('sha256').update(readFileSync(path.join(target,name))).digest('hex'))throw Error('Phone medal-count proof source mismatch: '+name);
+  // Exercise the actual app read deadline and retry against disposable loopback responses.
+  const loadingEvidence=path.join(evidence,'refresh-loading');
+  for(const mode of ['candidate','hosted']){
+    run(target,'git',['diff','--exit-code','HEAD','--']);
+    run(target,process.execPath,['tools/verify-refresh-loading.mjs',target,mode,path.join(loadingEvidence,mode)],{PLAYWRIGHT_MODULE:path.join(hostRoot,'node_modules/playwright/index.mjs')});
+    const loadingReport=JSON.parse(readFileSync(path.join(loadingEvidence,mode,'result.json'),'utf8'));
+    if(loadingReport.passed!==true||loadingReport.mode!==mode||loadingReport.checks?.length!==7||loadingReport.errors?.length!==0||!loadingReport.requests?.length||!loadingReport.requests.every(request=>request.method==='GET'))throw Error('Refresh/loading acceptance is incomplete or stale');
+    for(const name of mode==='hosted'?['public/app.js','public/phone-cache.js','cloud/phone-cache-client.mjs']:['public/app.js'])if(loadingReport.sourceFiles?.[name]!==createHash('sha256').update(readFileSync(path.join(target,name))).digest('hex'))throw Error('Refresh/loading proof source mismatch: '+name);
+    if(execFileSync('git',['rev-parse','HEAD'],{cwd:target,env:cleanEnv,encoding:'utf8'}).trim()!==downloadSourceSha)throw Error('Refresh/loading proof changed source');
+    run(target,'git',['diff','--exit-code','HEAD','--']);
+  }
   run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-population-insights.mjs',path.join(evidence,'insights')]);
   run(target,process.execPath,['tools/verify-insights-refresh.mjs',target,'candidate',path.join(evidence,'insights-refresh')]);
@@ -129,6 +140,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const published=path.resolve('dist/grindzone-download');mkdirSync(published,{recursive:true});
   // Preserve only the bounded synthetic proof receipt; private backup fixture stays in test output.
   copyFileSync(path.join(countsEvidence,'http-browser-acceptance.json'),path.join(published,'local-phone-counts.json'));
+  for(const mode of ['candidate','hosted'])copyFileSync(path.join(loadingEvidence,mode,'result.json'),path.join(published,'local-refresh-loading-'+mode+'.json'));
   copyFileSync(archive,path.join(published,manifest.filename));copyFileSync(path.join(download,'release.json'),path.join(published,'release.json'));
   for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play','harvest-intake']){
     const report=path.join(evidence,mode+'-'+kind+'.json');
