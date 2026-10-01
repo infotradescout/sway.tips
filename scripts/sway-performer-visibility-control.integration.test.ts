@@ -273,7 +273,7 @@ async function main() {
       profile: (await proof.query('SELECT * FROM performer_public_profiles WHERE performer_id = $1', [id])).rows,
       links: (await proof.query('SELECT * FROM performer_profile_links WHERE performer_id = $1 ORDER BY id', [id])).rows,
       profileAudits: (await proof.query(`SELECT * FROM audit_events WHERE entity_id = $1
-        AND event_type = 'performer_public_profile.update' ORDER BY id`, [toAuditEntityUuid(id)])).rows
+        AND event_type = 'performer_public_profile.update' ORDER BY event_id`, [toAuditEntityUuid(id)])).rows
     });
     const beforeStale = await snapshotNative(ownerPerformerId);
     const foreignBefore = await snapshotNative(otherPerformerId);
