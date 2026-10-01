@@ -68,7 +68,7 @@ type RunningServer = {
 
 async function startSwayServer(databaseUrl: string, port: number): Promise<RunningServer> {
   const baseUrl = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+  const child = spawn(process.execPath, ['--import', 'tsx/esm', 'server.ts'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -93,47 +93,64 @@ async function startSwayServer(databaseUrl: string, port: number): Promise<Runni
     stdio: ['ignore', 'pipe', 'pipe']
   }) as ChildProcessWithoutNullStreams;
 
-  const output: string[] = [];
+  const secrets = [databaseUrl, new URL(databaseUrl).password, decodeURIComponent(new URL(databaseUrl).password)].filter(Boolean);
+  const redact = (value: string) => {
+    let text = value;
+    for (const secret of secrets.sort((a, b) => b.length - a.length)) text = text.split(secret).join('[REDACTED]');
+    return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, '[REDACTED_URI]');
+  };
+  let output = '', truncated = false, closed = false;
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+  const close = new Promise<void>((resolve) => child.once('close', () => { closed = true; resolve(); }));
   const record = (chunk: Buffer) => {
-    output.push(chunk.toString('utf8'));
-    if (output.length > 200) output.splice(0, output.length - 200);
+    if (truncated) return;
+    if (output.length + chunk.length > 262144) { output = ''; truncated = true; return; }
+    output += chunk.toString('utf8');
   };
   child.stdout.on('data', record);
   child.stderr.on('data', record);
 
   const earlyExit = new Promise<never>((_resolve, reject) => {
-    child.once('exit', (code, signal) => reject(new Error(
-      `Sway visibility proof server exited before readiness (code=${code}, signal=${signal}).\n${output.join('')}`
-    )));
+    child.once('error', (error) => reject(new Error(`Owned proof server spawn failed: ${(error as NodeJS.ErrnoException).code ?? error.name}`)));
+    child.once('exit', (code, signal) => {
+      exit = { code, signal };
+      reject(new Error(`Sway visibility proof server exited before readiness (code=${code}, signal=${signal}).\n${redact(output)}`));
+    });
   });
+  const waitForClose = async (milliseconds: number) => {
+    if (closed) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([close.then(() => true), new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), milliseconds); })]); }
+    finally { clearTimeout(timer); }
+  };
+  const stop = async () => {
+    if (!closed && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    if (!await waitForClose(5_000) && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    assert(await waitForClose(5_000), 'Owned visibility proof server close was not observed within bounded cleanup.');
+    console.log('visibility-owned-server-close ' + JSON.stringify({ pid: child.pid, exit, closed }));
+  };
   const readiness = (async () => {
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
+    const deadline = performance.now() + 20_000;
+    while (performance.now() < deadline) {
       try {
-        const response = await fetch(`${baseUrl}/api/health/network-probe`, { signal: AbortSignal.timeout(3_000) });
-        if (response.status === 204) return;
+        const timeout = Math.max(1, Math.floor(Math.min(3_000, deadline - performance.now())));
+        const response = await fetch(`${baseUrl}/api/health/network-probe`, { signal: AbortSignal.timeout(timeout) });
+        if (performance.now() < deadline && response.status === 204) return;
       } catch {
         // The listener is not ready yet.
       }
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      const remaining = deadline - performance.now();
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(50, remaining)));
     }
-    throw new Error(`Timed out waiting for the Sway visibility proof server.\n${output.join('')}`);
+    throw new Error(`Timed out waiting for the Sway visibility proof server.\n${redact(output)}`);
   })();
-  await Promise.race([readiness, earlyExit]);
+  try { await Promise.race([readiness, earlyExit]); }
+  catch (error) { await stop(); throw error; }
 
   return {
     baseUrl,
-    logs: () => output.join(''),
-    stop: async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-      const forced = new Promise<void>((resolve) => setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-        resolve();
-      }, 5_000));
-      await Promise.race([stopped, forced]);
-    }
+    logs: () => redact(output),
+    stop
   };
 }
 
@@ -220,7 +237,7 @@ async function main() {
     assertStatus(unlisted, 200, 'owner unlisted visibility mutation', server);
     assert.equal(unlisted.body.visibilityState, 'unlisted');
 
-    const profileSave = await owner.post('/api/talent/profile/public', {
+    const profilePayload = {
       roles: ['dj', 'host', 'producer'],
       stageName: 'Visibility Owner',
       headline: 'Updated visibility headline',
@@ -231,7 +248,9 @@ async function main() {
       booking: { email: null, phone: null },
       socialLinks: { facebook: null, instagram: null, tiktok: null, youtube: null, soundcloud: null, website: null },
       links: []
-    });
+    };
+    // Keep the existing versionless save as an independent compatibility proof.
+    const profileSave = await owner.post('/api/talent/profile/public', profilePayload);
     assertStatus(profileSave, 202, 'ordinary profile save', server);
     assert.equal(profileSave.body.profile.visibilityState, 'unlisted');
     assert.equal(profileSave.body.profile.primaryRole, 'dj');
@@ -242,6 +261,50 @@ async function main() {
     assert.equal(afterProfileSave.body.profile.visibilityState, 'unlisted');
     assert.equal(afterProfileSave.body.profile.primaryRole, 'dj');
     assert.deepEqual(afterProfileSave.body.profile.roles, ['dj', 'host', 'producer']);
+
+    assert.equal(initial.body.profile.nativeVersion, '0');
+    assert.equal(profileSave.body.profile.nativeVersion, '1');
+    assert.equal(afterProfileSave.body.profile.nativeVersion, '1');
+    // A nonempty fixture link makes an unintended stale delete observable.
+    await proof.query(`INSERT INTO performer_profile_links (performer_id, label, url, kind)
+      VALUES ($1, 'Original fixture link', 'https://example.com/original', 'other')`, [ownerPerformerId]);
+    const snapshotNative = async (id: string) => ({
+      performer: (await proof.query('SELECT * FROM performers WHERE id = $1', [id])).rows,
+      profile: (await proof.query('SELECT * FROM performer_public_profiles WHERE performer_id = $1', [id])).rows,
+      links: (await proof.query('SELECT * FROM performer_profile_links WHERE performer_id = $1 ORDER BY id', [id])).rows,
+      profileAudits: (await proof.query(`SELECT * FROM audit_events WHERE entity_id = $1
+        AND event_type = 'performer_public_profile.update' ORDER BY id`, [toAuditEntityUuid(id)])).rows
+    });
+    const beforeStale = await snapshotNative(ownerPerformerId);
+    const foreignBefore = await snapshotNative(otherPerformerId);
+    const staleSave = await owner.post('/api/talent/profile/public', {
+      ...profilePayload, expectedNativeVersion: initial.body.profile.nativeVersion,
+      headline: 'Rejected stale headline', bio: 'Rejected stale bio', city: 'Rejected stale city', roles: ['host']
+    });
+    assertStatus(staleSave, 409, 'stale manual native profile CAS', server);
+    assert.deepEqual(await snapshotNative(ownerPerformerId), beforeStale, 'Rejected CAS must leave performer/profile/links/audit unchanged');
+    const afterStale = await owner.get('/api/talent/profile/public');
+    assertStatus(afterStale, 200, 'profile read after stale rejection', server);
+    assert.equal(afterStale.body.profile.nativeVersion, '1');
+    assert.equal(afterStale.body.profile.headline, profilePayload.headline);
+    assert.equal(afterStale.body.profile.bio, profilePayload.bio);
+    assert.equal(afterStale.body.profile.links[0]?.label, 'Original fixture link');
+
+    const currentSave = await owner.post('/api/talent/profile/public', {
+      ...profilePayload, performerId: otherPerformerId,
+      expectedNativeVersion: afterStale.body.profile.nativeVersion, headline: 'Current native revision accepted'
+    });
+    assertStatus(currentSave, 202, 'current manual native profile CAS', server);
+    assert.equal(currentSave.body.profile.performerId, ownerPerformerId);
+    assert.equal(currentSave.body.profile.nativeVersion, '2');
+    assert.equal(currentSave.body.profile.visibilityState, 'unlisted');
+    assert.deepEqual(await snapshotNative(otherPerformerId), foreignBefore, 'Untrusted performerId must not change the foreign performer/profile/links/audit');
+    const afterCurrent = await owner.get('/api/talent/profile/public');
+    assertStatus(afterCurrent, 200, 'profile read after current CAS', server);
+    assert.equal(afterCurrent.body.profile.nativeVersion, '2');
+    assert.equal(afterCurrent.body.profile.headline, 'Current native revision accepted');
+    assert.equal((await snapshotNative(ownerPerformerId)).profileAudits.length, 2, 'Only the two accepted saves may create profile audits');
+    console.log('visibility-native-cas-proof stale409/current202/original-owner/unchanged-foreign persisted; sequential synthetic-actor proof');
 
     const draft = await owner.post('/api/talent/profile/visibility', { visibilityState: 'draft' });
     assertStatus(draft, 200, 'owner draft visibility mutation', server);
@@ -272,8 +335,11 @@ async function main() {
 
     console.log('Sway performer visibility control integration passed.');
   } finally {
-    if (server) await server.stop();
-    await proof.close();
+    try {
+      if (server) await server.stop();
+    } finally {
+      await proof.close();
+    }
   }
 }
 
