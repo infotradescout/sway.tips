@@ -3,8 +3,8 @@
 export async function runProfileEditorCases({ createFixture }) {
   const results = [];
   const check = (condition, message) => { if (!condition) throw new Error(message); };
-  const profile = (name, partner = {}) => ({ profile: {
-    handle: name.toLowerCase(), roles: ['dj'], stageName: name,
+  const profile = (name, partner = {}, handle = name.toLowerCase()) => ({ profile: {
+    handle, roles: ['dj'], stageName: name,
     headline: `${name} headline`, bio: `${name} private draft`,
     booking: { email: `${name.toLowerCase()}@example.test`, phone: '5555550100' },
     socialLinks: {}, specialties: [], links: [], partner
@@ -49,8 +49,21 @@ export async function runProfileEditorCases({ createFixture }) {
     await f.render('beta'); await f.render('alpha');
     const latest = f.gets().at(-1);
     check(latest !== first, 'returning performer reused the old read');
-    await f.reply(latest, profile('Current Alpha')); await f.reply(first, profile('Old Alpha'));
+    // Both responses belong to alpha; distinct display values identify request generations.
+    // A mismatched handle would test the owner guard instead of stale-read isolation.
+    await f.reply(latest, profile('Current Alpha', {}, 'alpha')); await f.reply(first, profile('Old Alpha', {}, 'alpha'));
     check(f.value('Headline') === 'Current Alpha headline', 'old same-handle response won');
+  });
+  await test('a mismatched current-profile response cannot enable editing or sync', async f => {
+    await f.render('alpha'); await f.reply(f.gets().at(-1), profile('Beta'));
+    check(f.value('Headline') === '', 'wrong performer populated the draft');
+    check(f.value('Public booking email') === '', 'wrong performer exposed private contact');
+    check(f.saveDisabled(), 'wrong performer enabled profile saving');
+    check(f.fieldsetDisabled(), 'wrong performer enabled manual editing');
+    check(!f.hasVisibility(), 'wrong performer enabled visibility controls');
+    check(f.text().includes('Reload the intended performer profile before editing.'), 'wrong performer lacked exact-target rejection');
+    check(!f.gets().some(request => request.url.includes('/sync')), 'wrong performer mounted profile sync');
+    await f.submit(); check(f.posts().length === 0, 'wrong performer submitted a write');
   });
   await test('late save cannot report success or refresh another performer', async f => {
     await f.render('alpha'); await f.reply(f.gets().at(-1), profile('Alpha'));
@@ -176,7 +189,7 @@ export async function runProfileEditorCases({ createFixture }) {
     await f.consent(); await f.click('Accept exact Brand Partner terms');
     const oldTerms = f.posts().at(-1); await f.submit();
     await f.reply(f.posts().at(-1), {}, 401);
-    await f.click('Reload profile'); await f.reply(f.gets().at(-1), profile('Reloaded', pendingPartner));
+    await f.click('Reload profile'); await f.reply(f.gets().at(-1), profile('Reloaded', pendingPartner, 'alpha'));
     await f.reply(oldTerms, {});
     check(f.value('Headline') === 'Reloaded headline', 'old work changed reloaded data');
     check(f.buttonDisabled('Accept exact Brand Partner terms'), 'old consent survived reload');

@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { classifyDiscoveryRequest, runDiscoveryTraffic, withDiscoveryTrafficEvidence, readDiscoveryTrafficClass } from '../src/server/discovery-traffic.ts';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 import { ACQUISITION_QUALITY_SQL, validateAcquisitionWindow } from './report-acquisition-quality.mjs';
 
 for (const key of ['DATABASE_URL','TEST_DATABASE_URL','SWAY_REAL_POSTGRES_PROOF_DATABASE_URL','STRIPE_SECRET_KEY','SESSION_SECRET','BREVO_API_KEY','SENDGRID_API_KEY','SMTP_PASS']) assert(!process.env[key], 'No inherited credentials: '+key);
 assert.notEqual(process.env.SWAY_REQUIRE_REAL_POSTGRES_PROOF, 'true');
-const report={passed:false, checks:[], scope:'Real server.ts, request guard and audit writes with isolated PGlite/PostgreSQL-protocol data. Request signals and conversion fixtures are synthetic; no production writes or verified human audience.'};
+const report={passed:false, checks:[], scope:'Canonical source server.ts launched with Node/TSX ESM-only loader in test mode, request guard and audit writes with isolated PGlite/PostgreSQL-protocol data. Request signals and conversion fixtures are synthetic; no production writes or verified human audience.'};
 const browserHeaders={
   'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36',
   'referer':'https://app.sway.tips/discover', 'origin':'https://app.sway.tips',
@@ -18,7 +19,30 @@ const browserHeaders={
 const req=headers=>({method:'POST',originalUrl:'/api/analytics/shell',headers});
 const classify=headers=>classifyDiscoveryRequest(req(headers)).classification;
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let db,child,output='';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const lifecycle={pid:null,spawnError:null,exit:null,close:null,attempts:0,elapsedMs:0,startupBudgetMs:90000,lastProbe:null,stdoutBytes:0,stderrBytes:0,outputTruncated:false,cleanup:null};
+let db,child,output='',startedAt=0,childClosed;
+const secrets=new Set();
+function redact(value){
+  let text=String(value);
+  for(const secret of [...secrets].filter(Boolean).sort((a,b)=>b.length-a.length))text=text.split(secret).join('[REDACTED]');
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi,'[REDACTED_URI]')
+    .replace(/((?:password|passwd|pwd|token|secret|authorization|api[_-]?key)\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi,'$1[REDACTED]');
+}
+function capture(stream,chunk){
+  lifecycle[stream+'Bytes']+=chunk.length;
+  // Join before redaction so credentials split across stream chunks are covered.
+  // On overflow omit captured text entirely, never retain a secret fragment.
+  if(lifecycle.outputTruncated)return;
+  if(output.length+chunk.length>262144){output='';lifecycle.outputTruncated=true;return;}
+  output+=chunk.toString();
+}
+async function waitForClose(milliseconds){
+  if(!child||lifecycle.close)return true;
+  let timer;
+  try{return await Promise.race([childClosed.then(()=>true),new Promise(resolve=>{timer=setTimeout(()=>resolve(false),milliseconds);})]);}
+  finally{clearTimeout(timer);}
+}
 try {
   assert.equal(classify(browserHeaders),'browser_candidate');
   for(const agent of ['Googlebot/2.1','OAI-SearchBot/1.3','ChatGPT-User/1.0','facebookexternalhit/1.1','Mozilla/5.0 AppleWebKit/537.36 Chrome/140 Safari/537.36 SomeCrawler/1.0']) assert.equal(classify({...browserHeaders,'user-agent':agent}),'automation_signal');
@@ -52,15 +76,30 @@ try {
   assert.equal(db.kind,'embedded-postgres');assert.equal(new URL(db.databaseUrl).hostname,'127.0.0.1');
   const reservation=net.createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const origin='http://127.0.0.1:'+port;
-  child=spawn(process.execPath,['--import','tsx','server.ts'],{env:{...process.env,NODE_ENV:'test',HOST:'127.0.0.1',PORT:String(port),DATABASE_URL:db.databaseUrl,SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION:'true'},stdio:['ignore','pipe','pipe']});
-  child.stdout.on('data',b=>{output=(output+b).slice(-20000);});child.stderr.on('data',b=>{output=(output+b).slice(-20000);});
+  const password=new URL(db.databaseUrl).password;
+  for(const value of [db.databaseUrl,password,decodeURIComponent(password),encodeURIComponent(password),encodeURIComponent(decodeURIComponent(password))])secrets.add(value);
+  startedAt=performance.now();
+  // This source entry is ESM; avoid installing global CJS transform hooks.
+  child=spawn(process.execPath,['--import','tsx/esm','server.ts'],{cwd:root,env:{...process.env,NODE_ENV:'test',HOST:'127.0.0.1',PORT:String(port),DATABASE_URL:db.databaseUrl,SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION:'true'},stdio:['ignore','pipe','pipe']});
+  lifecycle.pid=child.pid??null;
+  // Register closure immediately, before probes or cleanup can observe exit.
+  childClosed=new Promise(resolve=>child.once('close',(code,signal)=>{lifecycle.close={code,signal};resolve();}));
+  child.once('error',error=>{lifecycle.spawnError={code:error.code??null,message:redact(error.message)};});
+  child.once('exit',(code,signal)=>{lifecycle.exit={code,signal};});
+  child.stdout.on('data',b=>capture('stdout',b));child.stderr.on('data',b=>capture('stderr',b));
   let ready=false;
-  for(let i=0;i<150;i++){
-    if(child.exitCode!==null||child.signalCode!==null)break;
-    try{const response=await fetch(origin+'/api/build-marker',{signal:AbortSignal.timeout(1000)});if(response.ok&&(response.headers.get('content-type')||'').includes('json')){ready=true;break;}}catch{}
-    await pause(200);
+  // Observed uninstrumented TSX startup takes 68s on the shared Windows host.
+  // An elapsed budget remains bounded even when failed probes return instantly.
+  const deadline=startedAt+lifecycle.startupBudgetMs;
+  while(performance.now()<deadline){
+    if(lifecycle.spawnError||child.exitCode!==null||child.signalCode!==null)break;
+    lifecycle.attempts++;
+    const probeTimeout=Math.max(1,Math.floor(Math.min(1000,deadline-performance.now())));
+    try{const response=await fetch(origin+'/api/build-marker',{signal:AbortSignal.timeout(probeTimeout)});const contentType=response.headers.get('content-type')||'';lifecycle.lastProbe={status:response.status,json:contentType.includes('json')};if(performance.now()<deadline&&response.ok&&contentType.includes('json')){ready=true;break;}}catch(error){lifecycle.lastProbe={errorName:error.name,errorCode:error.cause?.code??null};}
+    const remaining=deadline-performance.now();if(remaining>0)await pause(Math.min(200,remaining));
   }
-  assert(ready,'Isolated server startup failed: '+output);
+  lifecycle.elapsedMs=Math.round(performance.now()-startedAt);
+  assert(ready,'Isolated canonical source server startup failed');
   const payload=id=>({shell:'patron',surface:'public-discover',event:'discovery_landing',route_family:'public-discover',has_route_context:true,has_session_context:false,build_commit:'quality-fixture',journey_id:id,entry_path:'/discover',attribution_channel:'google'});
   const send=(body,headers)=>fetch(origin+'/api/analytics/shell',{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
   const cases=[['browser_candidate',browserHeaders],['automation_signal',{...browserHeaders,'user-agent':'Googlebot/2.1'}],['automation_signal',{...browserHeaders,'user-agent':'OAI-SearchBot/1.3'}],['automation_signal',{...browserHeaders,'user-agent':'ChatGPT-User/1.0'}],['qa_signal',{...browserHeaders,'x-sway-qa':'1'}],['qa_signal',{...browserHeaders,'user-agent':'Mozilla/5.0 HeadlessChrome/140 Safari/537.36'}],['unclassified',{'user-agent':'UnknownClient/1'}]];
@@ -107,9 +146,19 @@ try {
   for(const id of [jGood,jWrong,jLegacy,jTainted])assert(!JSON.stringify(totals).includes(id),'Report cannot disclose journey IDs');
   report.checks.push('actual SQL: absent classification stays unavailable; automation-tainted journeys excluded; source/entry/action/entity/time-ordered durable matching; wrong entity, early outcome and legacy traffic cannot inflate conversions');
   report.passed=true;
-}catch(error){report.error=String(error.stack||error);report.serverTail=output.slice(-4000);}
+}catch(error){report.error=redact(error.stack||error);}
 finally{
-  if(child&&child.exitCode===null&&child.signalCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill('SIGTERM');for(let i=0;i<50&&child.exitCode===null&&child.signalCode===null;i++)await pause(100);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited;}
+  if(child){
+    if(!lifecycle.spawnError&&child.exitCode===null&&child.signalCode===null){
+      lifecycle.cleanup={termSent:child.kill('SIGTERM'),killSent:false,closed:false};
+      if(!await waitForClose(5000)&&child.exitCode===null&&child.signalCode===null)lifecycle.cleanup.killSent=child.kill('SIGKILL');
+    }
+    const closed=await waitForClose(5000);
+    lifecycle.cleanup={...lifecycle.cleanup,closed};
+    if(!closed){report.passed=false;report.error=redact((report.error||'')+' Owned server close was not observed within bounded cleanup.');}
+    report.serverLifecycle=lifecycle;
+    if(!report.passed)report.serverTail=redact(output).slice(-4000);
+  }
   await db?.close();
   console.log('ACQUISITION_QUALITY_TEST '+JSON.stringify(report));
 }

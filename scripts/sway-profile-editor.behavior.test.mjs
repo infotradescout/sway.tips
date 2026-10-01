@@ -58,7 +58,7 @@ try {
   }
   const failed = results.filter(result => !result.passed);
   console.log(`Profile editor: ${results.length - failed.length} passed, ${failed.length} failed; React ${dom.window.__reactVersion}.`);
-  assert.equal(results.length, 26, 'Every permanent editor scenario must execute.');
+  assert.equal(results.length, 27, 'Every permanent editor scenario must execute.');
   assert.deepEqual(errors, [], 'The editor produced uncaught rendering errors.');
   assert.equal(failed.length, 0, 'Profile-editor regressions failed.');
 } finally {

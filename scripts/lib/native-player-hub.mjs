@@ -1,5 +1,5 @@
 import { createNativePlayerAdapter } from './native-player-registry.mjs';
-import { NativePlayerSession } from './native-player-session.mjs';
+import { NativePlayerSession, assertNativePlayerTargetIdentity, validateNativePlayerJournal } from './native-player-session.mjs';
 
 // Shared native-host interface: no network listener, playback side effect or
 // implicit target selection at construction. Account/MIDI hosts stay separate.
@@ -10,6 +10,8 @@ export class NativePlayerHub {
     if (new Set(configs.map(config => config.id)).size !== configs.length) throw new Error('Connection IDs must be unique.');
     // Validate every adapter before writing any new connection or contacting a player.
     const players = configs.map(config => createNativePlayerAdapter(config));
+    validateNativePlayerJournal(store.journal, actorId);
+    players.forEach(player => assertNativePlayerTargetIdentity(player, store.journal));
     configs.forEach((config, index) => this.#connections.set(config.id,
       new NativePlayerSession({ player: players[index], actorId, connectionId: config.id, journal: store.journal, persist: store.persist })));
   }
