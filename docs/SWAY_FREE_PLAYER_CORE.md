@@ -3,7 +3,8 @@
 This source slice extracts VLC HTTP and mpv JSON IPC from draft PR #249 at
 `943c90e63080cfa9b86014aa7b89c6c117632e67` onto released main
 `bf23a3e40113c24169810a664220c96a45be66f1`. It does not bring the draft's Spotify
-authorization, provider routes, database migration, network host or browser UI.
+authorization, provider routes or database migration. The next slice adds the
+existing native browser host/client and mounts its panel in the real Sources chooser.
 It preserves the released controller and GrindZone host files.
 
 The canonical native registry constructs the existing VLC/mpv adapters and reuses
@@ -42,9 +43,22 @@ named pipe and actual child Node processes to test journal restart, target isola
 strict acknowledgements and no replay. This is software proof, not an installed
 VLC/mpv, Windows pipe ACL, physical audio, browser-consent or OS-reboot claim.
 
-Remaining integration: extract and reconcile the existing native browser host/client
-and Sources panel without the unrelated provider/schema scope; preserve this journal
-and target protocol. Complete normal local-network consent and private Windows
-configuration/pipe permissions, then perform actual free-player acceptance when
-installation/control authority is granted. Do not expose a network listener or merge
-the UI merely to bypass those acceptance items.
+The Sources panel uses the existing account/performer/room context. Changes to that
+scope, readiness or preview abort pending browser requests and forget pairing. It
+never chooses an output automatically. A current observation must match the selected
+connection, revision and immutable target before controls become available. Lost
+confirmation stays held; refresh, reconnect and browser reload never retry it.
+
+`npm run player:host -- PRIVATE_CONFIG.json ABSOLUTE_JOURNAL.json` starts the existing
+local helper only after the operator has authorized player control. It listens on
+numeric loopback, requires the exact Sway app origin and a fresh six-hour pairing key,
+and exposes only allowlisted transport operations. The browser stores the key only
+in memory; private player endpoints and credentials stay in the local config. Host
+responses whitelist fields, strip path-like metadata and hide internal errors.
+See [local setup](runbooks/native-player-connections.md).
+
+Host/client tests and the real Sources chooser browser test use simulated downstream
+players and an ephemeral browser permission grant. They do not prove normal user
+consent, installation, Windows pipe ACLs, physical audio or an OS reboot. Actual
+free-player acceptance still requires installation/control authority and normal local
+network consent; these source changes do not bypass those decisions.

@@ -1,6 +1,7 @@
 import { useId, type ChangeEvent, type FormEvent } from 'react';
 import { Upload, Music2, Library, ListMusic, ArrowUpRight, ChevronDown } from 'lucide-react';
 import PerformerSourcePlayerSetup from './PerformerSourcePlayerSetup';
+import NativePlayerConnections from './NativePlayerConnections';
 import '../performer-workspace.css';
 
 type ImportStatus = 'idle' | 'submitting' | 'success' | 'error';
@@ -33,6 +34,7 @@ export default function PerformerSourceImportChoices(props: PerformerSourceImpor
   const fileBusy = props.previewMode || props.djLibraryImportStatus === 'submitting';
   return (
     <>
+      <NativePlayerConnections />
       <section data-sway-source-import-choices="true" className="sway-source-panel">
         <p className="sway-source-kicker">Add music</p>
         <h3>Bring your music with you.</h3>
