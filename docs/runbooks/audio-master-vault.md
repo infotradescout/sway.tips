@@ -63,6 +63,31 @@ The three credential values are declared `sync: false` in `render.yaml`; Git nev
 
 The endpoint intentionally exposes no account ID, bucket name, key, secret, object path, or user data.
 
+## Optional Neon Preview Adapter
+
+`render.yaml` continues to select R2. The optional `neon` provider requires a separately provisioned **private** bucket on an isolated Neon branch, with its database and storage endpoint bound to that same branch. This adapter does not create buckets, change production configuration, copy existing R2 files, or grant access to them.
+
+Set only on that isolated preview:
+
+```text
+SWAY_AUDIO_STORAGE_PROVIDER=neon
+SWAY_AUDIO_NEON_BUCKET=<private preview bucket>
+AWS_ENDPOINT_URL_S3=<HTTPS branch storage endpoint origin>
+AWS_REGION=<branch storage region>
+AWS_ACCESS_KEY_ID=<branch-scoped storage credential>
+AWS_SECRET_ACCESS_KEY=<branch-scoped storage secret>
+```
+
+The existing AWS S3 SDK supplies SigV4 and path-style addressing; the adapter disables optional SDK request checksums as recommended by Neon's quickstart. No new SDK or signing implementation is introduced. Neon completes multipart uploads directly to a private `masters/` key and reads back the bytes to verify size and SHA-256 before the existing database transaction can seal a version. It does not rely on `CopyObject`, which Neon's current compatibility reference does not list. Failed verification uses the existing failed-upload cleanup path to delete that unsealed target. Successful retry never deletes a sealed Neon master. R2 retains its existing staging-and-copy behavior.
+
+To retain access to R2 identities in a preview, also set `SWAY_AUDIO_STORAGE_READ_PROVIDERS=r2` and supply **read-only R2 credentials** for the matching legacy bucket. Never clone writable production R2 credentials into a preview. New uploads go to Neon; original reads use the provider and bucket persisted in PostgreSQL. Every mutation of a non-primary provider—including upload writes, completion, abort, and failed-object deletion—is rejected before transport. Existing pending R2 uploads must finish in the unchanged R2 production application; this preview is not an upload migration facility. Register only backends deliberately needed by that environment. Each registered backend must pass startup readiness. A missing backend, different bucket, storage error, or missing object fails closed; none retries against a different provider. A Neon branch does **not** isolate external R2 bytes. No credentials are created or copied by this change.
+
+All downloads continue through Sway's existing ownership, grant, revocation, expiry, use-count, and audit checks. The adapter does not expose anonymous object URLs or add presigned URLs. `HeadBucket` proves reachability only; verify private access independently before live preview proof. Neon versioning and lifecycle configuration are not enforced according to its compatibility reference, so neither is a recovery or retention control.
+
+Use the existing generated non-user-owned WAV and the ten production-evidence controls below in the isolated preview, recording the actual branch and commit. Until that provider proof exists, deterministic SDK mocks establish adapter behavior only, not live Neon durability, bucket privacy, credentials, recovery, or operational readiness. Selecting R2 again is safe only while Neon rows remain routed by `SWAY_AUDIO_STORAGE_READ_PROVIDERS=neon`; removing a configured backend does not move its files. An application rollback to code without Neon support must use a database/environment without Neon identities or leave those identities unavailable while preserving their bytes.
+
+Official sources checked 2026-09-17: [Neon storage quickstart](https://neon.com/docs/storage/get-started), [S3 compatibility](https://neon.com/docs/storage/s3-compatibility).
+
 ## Automated Evidence
 
 Run:
